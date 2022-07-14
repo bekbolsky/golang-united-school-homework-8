@@ -28,30 +28,39 @@ type User struct {
 type Arguments map[string]string
 
 func parseArgs() Arguments {
-	fileNameFlag := flag.String("fileName", "", "json file name")
-	operationFlag := flag.String("operation", "", "add, list, findById, remove")
 	idFlag := flag.String("id", "", "id of the user")
+	operationFlag := flag.String("operation", "", "add, list, findById, remove")
 	itemFlag := flag.String("item", "", "item to add to the file")
+	fileNameFlag := flag.String("fileName", "", "json file name")
 
 	flag.Parse()
 	return Arguments{
-		"fileName":  *fileNameFlag,
-		"operation": *operationFlag,
 		"id":        *idFlag,
+		"operation": *operationFlag,
 		"item":      *itemFlag,
+		"fileName":  *fileNameFlag,
 	}
 }
 
-// addItem writes user to the file as JSON array.
+// addItem writes item to the file as JSON array.
 // If file is empty, then user should be added to the file,
 // otherwise user should be added to the end of the file.
+// If user with specified id already exists in file,
+// then error has to be returned.
 func addItem(file *os.File, writer io.Writer, item string) error {
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return err
 	}
-	var itemList []User
-	err = json.Unmarshal(data, &itemList)
+	if len(data) == 0 {
+		_, err = writer.Write([]byte(item))
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	var itemArray []User
+	err = json.Unmarshal(data, &itemArray)
 	if err != nil {
 		return err
 	}
@@ -60,18 +69,20 @@ func addItem(file *os.File, writer io.Writer, item string) error {
 	if err != nil {
 		return err
 	}
-	for _, userItem := range itemList {
+	for _, userItem := range itemArray {
 		if userItem.ID == user.ID {
 			_, err = writer.Write([]byte("Item with id " + user.ID + " already exists"))
-			return err
+			if err != nil {
+				return err
+			}
+			return nil
 		}
 	}
-	itemList = append(itemList, user)
-	data, err = json.Marshal(itemList)
+	itemArray = append(itemArray, user)
+	data, err = json.Marshal(itemArray)
 	if err != nil {
 		return err
 	}
-	// _, err = writer.Write([]byte("[" + string(data) + "]"))
 	_, err = writer.Write(data)
 	if err != nil {
 		return err
@@ -151,22 +162,23 @@ func findUserById(file *os.File, writer io.Writer, id string) error {
 	return nil
 }
 
-// removeUser removes user from the file.
-// If user with specified id does not exist in file,
-// it should print message to the io.Writer «Item with id not found»
-// If user exists, then user should be removed from the file.
+// removeUser removes user from the JSON array by id.
+// If user with id 2 does not exist in file,
+// it should print message to the io.Writer «Item with id 2 not found»
+// Otherwise, user should be removed from the file.
 func removeUser(file *os.File, writer io.Writer, id string) error {
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return err
 	}
 	if len(data) == 0 {
-		_, err = writer.Write([]byte("Item with id " + id + " not found"))
+		_, err = writer.Write([]byte(""))
 		if err != nil {
 			return err
 		}
 		return nil
 	}
+
 	var item []User
 	err = json.Unmarshal(data, &item)
 	if err != nil {
@@ -175,21 +187,25 @@ func removeUser(file *os.File, writer io.Writer, id string) error {
 	for i, user := range item {
 		if user.ID == id {
 			item = append(item[:i], item[i+1:]...)
-			break
+			data, err = json.Marshal(item)
+			if err != nil {
+				return err
+			}
+			_, err = writer.Write(data)
+			if err != nil {
+				return err
+			}
+			return nil
 		}
 	}
-	data, err = json.Marshal(item)
-	if err != nil {
-		return err
-	}
-	_, err = writer.Write(data)
+	_, err = writer.Write([]byte("Item with id " + id + " not found"))
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// Users list should be stored in the json file.
+// Users list should be stored in the JSON file.
 // When you start your application and tries to perform some operations,
 // existing file should be used or new one should be created if it does not exist.
 func Perform(args Arguments, writer io.Writer) error {
@@ -211,13 +227,15 @@ func Perform(args Arguments, writer io.Writer) error {
 
 	switch operation {
 	case "add":
-		if args["item"] == "" {
+		item := args["item"]
+		if item == "" {
 			return ErrItemFlagMissing
 		}
-		err = addItem(file, writer, args["item"])
+		err = addItem(file, writer, item)
 		if err != nil {
 			return err
 		}
+
 	case "list":
 		err = listItems(file, writer)
 		if err != nil {
